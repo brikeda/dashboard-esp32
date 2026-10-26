@@ -107,8 +107,8 @@
             }
         });
 
-        // Configuração MQTT
-        const host = 'ws://broker.hivemq.com:8884/mqtt';
+        // Configuração MQTT corrigida (wss em vez de ws)
+        const host = 'wss://broker.hivemq.com:8884/mqtt';
         const clientId = 'web_' + Math.random().toString(16).substr(2, 8);
         const client = mqtt.connect(host, { clientId: clientId });
         const topic = "meu_esp32/sensor_distancia"; 
