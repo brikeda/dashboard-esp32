@@ -4,7 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Dashboard do Nível de Água</title>
-    <!-- MQTT e Chart.js -->
     <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
@@ -47,6 +46,21 @@
             width: 100%;
             margin-top: 20px;
         }
+        .btn-acao {
+            background-color: #ff0055;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            font-size: 16px;
+            font-weight: bold;
+            border-radius: 8px;
+            cursor: pointer;
+            margin-top: 15px;
+            transition: background 0.3s;
+        }
+        .btn-acao:hover {
+            background-color: #ff3377;
+        }
     </style>
 </head>
 <body>
@@ -58,30 +72,34 @@
         <div class="distance-display">
             <span id="valorDistancia">--</span> cm
         </div>
+
+        <!-- Botão para enviar comando ao ESP32 -->
+        <button class="btn-acao" onclick="enviarComando()">Ligar / Desligar Relé</button>
         
-        <!-- Contêiner do Gráfico -->
         <div class="chart-container">
             <canvas id="historicoGrafico"></canvas>
         </div>
     </div>
 
     <script>
-        // Configuração do Gráfico (Chart.js)
         const ctx = document.getElementById('historicoGrafico').getContext('2d');
-        const maxPontos = 20; // Quantidade máxima de pontos mostrados no gráfico
+        const maxPontos = 50; // Máximo de medições no gráfico
         
+        // Tenta carregar o histórico salvo no navegador. Se não existir, cria um vazio.
+        let dadosSalvos = JSON.parse(localStorage.getItem('historicoESP32')) || { labels: [], valores: [] };
+
         const grafico = new Chart(ctx, {
             type: 'line',
             data: {
-                labels: [], // Eixo X (Tempo)
+                labels: dadosSalvos.labels,
                 datasets: [{
                     label: 'Distância (cm)',
-                    data: [], // Eixo Y (Valores)
+                    data: dadosSalvos.valores,
                     borderColor: '#00ffcc',
                     backgroundColor: 'rgba(0, 255, 204, 0.1)',
                     borderWidth: 2,
                     fill: true,
-                    tension: 0.3, // Curvatura da linha
+                    tension: 0.3,
                     pointBackgroundColor: '#fff'
                 }]
             },
@@ -89,60 +107,68 @@
                 responsive: true,
                 maintainAspectRatio: false,
                 scales: {
-                    x: {
-                        ticks: { color: '#aaa' },
-                        grid: { color: 'rgba(255, 255, 255, 0.05)' }
-                    },
-                    y: {
-                        ticks: { color: '#aaa' },
-                        grid: { color: 'rgba(255, 255, 255, 0.05)' },
-                        beginAtZero: true
-                    }
+                    x: { ticks: { color: '#aaa' }, grid: { color: 'rgba(255, 255, 255, 0.05)' } },
+                    y: { ticks: { color: '#aaa' }, grid: { color: 'rgba(255, 255, 255, 0.05)' }, beginAtZero: true }
                 },
-                plugins: {
-                    legend: {
-                        labels: { color: '#fff' }
-                    }
-                }
+                plugins: { legend: { labels: { color: '#fff' } } }
             }
         });
 
-        // Configuração MQTT corrigida (wss em vez de ws)
+        // Configuração MQTT
         const host = 'wss://broker.hivemq.com:8884/mqtt';
         const clientId = 'web_' + Math.random().toString(16).substr(2, 8);
         const client = mqtt.connect(host, { clientId: clientId });
-        const topic = "meu_esp32/sensor_distancia"; 
+        
+        const topic_distancia = "meu_esp32/sensor_distancia"; 
+        const topic_comandos = "meu_esp32/comandos"; 
 
         client.on('connect', function () {
-            document.getElementById('status').innerText = 'Online - Aguardando dados...';
+            document.getElementById('status').innerText = 'Online - Recebendo dados...';
             document.getElementById('status').style.color = '#00ffcc';
-            client.subscribe(topic);
+            client.subscribe(topic_distancia);
         });
 
         client.on('message', function (topic, message) {
-            // Atualiza o texto grande
-            const distancia = parseFloat(message.toString()).toFixed(1);
-            document.getElementById('valorDistancia').innerText = distancia;
+            if(topic === topic_distancia) {
+                const distancia = parseFloat(message.toString()).toFixed(1);
+                document.getElementById('valorDistancia').innerText = distancia;
 
-            // Pega a hora atual formatada (HH:MM:SS)
-            const agora = new Date();
-            const horaFormatada = agora.getHours().toString().padStart(2, '0') + ':' + 
-                                  agora.getMinutes().toString().padStart(2, '0') + ':' + 
-                                  agora.getSeconds().toString().padStart(2, '0');
+                const agora = new Date();
+                const horaFormatada = agora.getHours().toString().padStart(2, '0') + ':' + 
+                                      agora.getMinutes().toString().padStart(2, '0') + ':' + 
+                                      agora.getSeconds().toString().padStart(2, '0');
 
-            // Adiciona os novos dados ao gráfico
-            grafico.data.labels.push(horaFormatada);
-            grafico.data.datasets[0].data.push(distancia);
+                // Atualiza o histórico
+                dadosSalvos.labels.push(horaFormatada);
+                dadosSalvos.valores.push(distancia);
 
-            // Remove o dado mais antigo se passar de 20 medições para não travar a tela
-            if (grafico.data.labels.length > maxPontos) {
-                grafico.data.labels.shift();
-                grafico.data.datasets[0].data.shift();
+                // Remove os dados mais antigos se ultrapassar o limite
+                if (dadosSalvos.labels.length > maxPontos) {
+                    dadosSalvos.labels.shift();
+                    dadosSalvos.valores.shift();
+                }
+
+                // Guarda os dados na memória do navegador
+                localStorage.setItem('historicoESP32', JSON.stringify(dadosSalvos));
+                grafico.update();
             }
-
-            // Atualiza o desenho do gráfico
-            grafico.update();
         });
+
+        // Envia o comando de alternância para o relé/LED
+        function enviarComando() {
+            if(client.connected) {
+                client.publish(topic_comandos, "TOGGLE");
+                console.log("Comando enviado!");
+            } else {
+                alert("Desconectado do servidor!");
+            }
+        }
+
+        // Função para limpar o gráfico manualmente, caso necessite (pode chamar pela consola F12)
+        function limparHistorico() {
+            localStorage.removeItem('historicoESP32');
+            location.reload();
+        }
 
         client.on('error', function (error) {
             console.error("Erro MQTT:", error);
